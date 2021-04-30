@@ -83,9 +83,51 @@ class Net(nn.Module):
     '''
     def __init__(self):
         super(Net, self).__init__()
-
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=8, kernel_size=(3,3), stride=1)
+        self.conv2 = nn.Conv2d(8, 12, 3, 1)
+        self.avgpool = nn.AvgPool2d(kernel_size = (2,2), stride =1)
+        self.dropout1 = nn.Dropout2d(0.5)
+        self.dropout2 = nn.Dropout2d(0.5)
+        self.fc1 = nn.Linear(1452, 200)
+        self.fc2 = nn.Linear(200, 64)
+        self.fc3 = nn.Linear(64, 10)
+        
     def forward(self, x):
-        return x
+        x = self.conv1(x)
+        x = F.relu(x)
+
+
+        # print(np.shape(x))
+        # print("conv1")
+
+        
+        x = self.conv2(x)
+        x = F.relu(x)
+
+
+        # print(np.shape(x))
+        # print("conv2")
+        
+        x = self.avgpool(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout1(x)
+        # print(np.shape(x))
+        # print("avgpool")
+        
+        
+        x = torch.flatten(x, 1)
+        # print(np.shape(x))
+        # print("flatte")
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        x = F.relu(x)
+        x = self.fc3(x)
+        
+        
+        output = F.log_softmax(x, dim=1)
+        return output
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -132,11 +174,11 @@ def main():
     # Training settings
     # Use the command line to modify the default settings
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
+    parser.add_argument('--batch-size', type=int, default=32, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=14, metavar='N',
+    parser.add_argument('--epochs', type=int, default=10, metavar='N',
                         help='number of epochs to train (default: 14)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR',
                         help='learning rate (default: 1.0)')
@@ -172,10 +214,10 @@ def main():
         assert os.path.exists(args.load_model)
 
         # Set the test model
-        model = fcNet().to(device)
+        model = Net().to(device)
         model.load_state_dict(torch.load(args.load_model))
 
-        test_dataset = datasets.MNIST('../data', train=False,
+        test_dataset = datasets.MNIST('./data', train=False,
                     transform=transforms.Compose([
                         transforms.ToTensor(),
                         transforms.Normalize((0.1307,), (0.3081,))
@@ -189,18 +231,37 @@ def main():
         return
 
     # Pytorch has default MNIST dataloader which loads data at each iteration
-    train_dataset = datasets.MNIST('../data', train=True, download=True,
+
+    train_dataset = datasets.MNIST('./data', train=True, download=True,
                 transform=transforms.Compose([       # Data preprocessing
+                    transforms.RandomRotation(5, fill=(0,)),
+                    transforms.RandomPerspective(.15, p = .15),
                     transforms.ToTensor(),           # Add data augmentation here
                     transforms.Normalize((0.1307,), (0.3081,))
+                    
+                    
                 ]))
 
     # You can assign indices for training/validation or use a random subset for
     # training by using SubsetRandomSampler. Right now the train and validation
     # sets are built from the same indices - this is bad! Change it so that
     # the training and validation sets are disjoint and have the correct relative sizes.
-    subset_indices_train = range(len(train_dataset))
-    subset_indices_valid = range(len(train_dataset))
+    sorted_train = [[],[],[],[],[],[],[],[],[],[]]
+    index = 0
+    portion = 1/2
+    
+    random_portion = torch.utils.data.RandomSampler(train_dataset)
+    for image in train_dataset:
+        sorted_train[image[1]].append(index)
+        index += 1
+
+    subset_indices_train = []
+    subset_indices_valid = []
+    for number in sorted_train:
+        number_randomized = list(torch.utils.data.SubsetRandomSampler(number))[:int(len(number)*(portion))]
+        subset_indices_valid += number_randomized[:int(len(number_randomized)*.15)]
+        subset_indices_train += number_randomized[int(len(number_randomized)*.15):]
+
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size,
@@ -212,7 +273,7 @@ def main():
     )
 
     # Load your model [fcNet, ConvNet, Net]
-    model = ConvNet().to(device)
+    model = Net().to(device)
 
     # Try different optimzers here [Adam, SGD, RMSprop]
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
@@ -225,12 +286,23 @@ def main():
         train(args, model, device, train_loader, optimizer, epoch)
         test(model, device, val_loader)
         scheduler.step()    # learning rate scheduler
-
+    print("train set")
+    test(model, device, train_loader)
+    print("validation Set")
+    test(model, device, val_loader)
+    print(device)
         # You may optionally save your model at each epoch here
 
     if args.save_model:
-        torch.save(model.state_dict(), "mnist_model.pt")
+        torch.save(model.state_dict(), "mnist_model2.pt")
 
 
 if __name__ == '__main__':
     main()
+train_accuraccy =  [25261/25503,12579/12750 ,6273/6376 ,3126/3189]
+test_accuraccy = [9875/10000, 9821/10000,9715/10000 ,9584/10000]
+train_points = [25503,12750 ,6376 ,3189]
+plt.plot(train_points,train_accuraccy)
+plt.plot(train_points,test_accuraccy)
+plt.legend(['Train Accuracy','Test Accuracy'])
+plt.xscale("log")

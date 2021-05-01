@@ -4,11 +4,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
+from PIL import Image
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data.sampler import SubsetRandomSampler
+from matplotlib import pyplot as plt
+from sklearn.metrics import confusion_matrix
 
 import os
+
 
 '''
 This code is adapted from two sources:
@@ -128,7 +133,40 @@ class Net(nn.Module):
         
         output = F.log_softmax(x, dim=1)
         return output
+    
+    def to_feature(self, x):
+        x = self.conv1(x)
+        x = F.relu(x)
 
+
+        # print(np.shape(x))
+        # print("conv1")
+
+        
+        x = self.conv2(x)
+        x = F.relu(x)
+
+
+        # print(np.shape(x))
+        # print("conv2")
+        
+        x = self.avgpool(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout1(x)
+        # print(np.shape(x))
+        # print("avgpool")
+        
+        
+        x = torch.flatten(x, 1)
+        # print(np.shape(x))
+        # print("flatte")
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        x = F.relu(x)
+
+        return x
 
 def train(args, model, device, train_loader, optimizer, epoch):
     '''
@@ -168,6 +206,54 @@ def test(model, device, test_loader):
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, test_num,
         100. * correct / test_num))
+
+def find_errors(model, device, test_loader):
+    model.eval()    # Set the model to inference mode
+    test_loss = 0
+    correct = 0
+    test_num = 0
+    sk_confusion = np.zeros((10,10))
+    confusion = np.zeros((10,10))
+    with torch.no_grad():   # For the inference step, gradient is not computed
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            printed = 0
+            # if printed == 0:
+            #     print(pred.eq(target.view_as(pred)))
+            #     printed = 1
+            # print(data)
+            # img = Image.fromarray(np.array(data))
+            # img.show()
+            # image
+            # print(target)
+            # index = 0
+            # for image in pred.eq(target.view_as(pred)):
+            #     if not image:
+            #         plt.imshow(np.array(torch.Tensor.cpu(data[index,0:,:])).reshape((28,28)))
+            #         plt.show()
+                    
+            #     index +=1
+            i= 0
+            sk_confusion += confusion_matrix(torch.Tensor.cpu(target), torch.Tensor.cpu(pred))
+            for guess in pred:
+                confusion[target[i],guess] += 1
+                i += 1
+            correct += pred.eq(target.view_as(pred)).sum().item()
+            test_num += len(data)
+    print(confusion)        
+    print(sk_confusion)
+    plt.imshow(np.log(sk_confusion))
+    plt.show()
+    
+    test_loss /= test_num
+
+    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+        test_loss, correct, test_num,
+        100. * correct / test_num))
+
 
 
 def main():
@@ -211,6 +297,8 @@ def main():
 
     # Evaluate on the official test set
     if args.evaluate:
+        print(args)
+        print(args.load_model)
         assert os.path.exists(args.load_model)
 
         # Set the test model
@@ -226,7 +314,7 @@ def main():
         test_loader = torch.utils.data.DataLoader(
             test_dataset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
-        test(model, device, test_loader)
+        find_errors(model, device, test_loader)
 
         return
 
@@ -248,7 +336,7 @@ def main():
     # the training and validation sets are disjoint and have the correct relative sizes.
     sorted_train = [[],[],[],[],[],[],[],[],[],[]]
     index = 0
-    portion = 1/2
+    portion = 1
     
     random_portion = torch.utils.data.RandomSampler(train_dataset)
     for image in train_dataset:
@@ -294,15 +382,27 @@ def main():
         # You may optionally save your model at each epoch here
 
     if args.save_model:
-        torch.save(model.state_dict(), "mnist_model2.pt")
+        torch.save(model.state_dict(), "mnist_model.pt")
 
 
 if __name__ == '__main__':
     main()
-train_accuraccy =  [25261/25503,12579/12750 ,6273/6376 ,3126/3189]
-test_accuraccy = [9875/10000, 9821/10000,9715/10000 ,9584/10000]
+train_accuraccy =  1 -np.array([25261/25503,12579/12750 ,6273/6376 ,3126/3189])
+test_accuraccy = 1-np.array([9875/10000, 9821/10000,9715/10000 ,9584/10000])
 train_points = [25503,12750 ,6376 ,3189]
 plt.plot(train_points,train_accuraccy)
 plt.plot(train_points,test_accuraccy)
 plt.legend(['Train Accuracy','Test Accuracy'])
 plt.xscale("log")
+plt.yscale('log')
+
+device = torch.device("cuda")
+model = Net().to(device)
+model.to_feature()
+#model.load_state_dict(torch.load('mnist_model.pt'))
+
+# first_kernals = model.state_dict()['conv1.weight']
+# for channel in first_kernals:
+#     plt.figure()
+#     plt.imshow(np.array(torch.Tensor.cpu(channel)).reshape((3,3)))
+# plt.show()
